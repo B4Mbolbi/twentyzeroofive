@@ -1,0 +1,1328 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>12.5.1 — Гонки. Карта. Сообщество.</title>
+
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css" />
+  <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+    :root {
+      --bg: #0a0a12;
+      --bg-card: #14141f;
+      --bg-elevated: #1c1c2b;
+      --purple: #8b5cf6;
+      --purple-glow: rgba(139, 92, 246, 0.4);
+      --blue: #3b82f6;
+      --text: #ffffff;
+      --text-dim: #8b8b9e;
+      --border: #26263a;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+    }
+
+    html, body {
+      height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+      user-select: none;
+    }
+
+    #app { position: relative; width: 100%; height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
+
+    /* ============ КАРТА ============ */
+    #map { position: absolute; inset: 0; z-index: 1; background: #0a0a12; }
+    .leaflet-tile-pane { filter: brightness(0.6) contrast(1.1) saturate(0.8) hue-rotate(200deg); }
+    .leaflet-control-attribution { display: none; }
+    .leaflet-routing-container { display: none !important; }
+
+    /* ============ ВЕРХНЯЯ ПАНЕЛЬ ============ */
+    .top-bar {
+      position: relative; z-index: 10; padding: 12px 16px;
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      background: linear-gradient(180deg, rgba(10,10,18,0.95) 0%, rgba(10,10,18,0) 100%);
+      pointer-events: none;
+    }
+    .top-bar > * { pointer-events: auto; }
+
+    .user-chip {
+      display: flex; align-items: center; gap: 8px; padding: 6px 12px 6px 6px;
+      background: rgba(20, 20, 31, 0.9); border: 1px solid var(--border);
+      border-radius: 100px; backdrop-filter: blur(20px);
+    }
+    .user-avatar {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: linear-gradient(135deg, var(--purple), var(--blue));
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700;
+    }
+    .user-info { display: flex; flex-direction: column; line-height: 1.1; }
+    .user-name { font-size: 13px; font-weight: 600; }
+    .user-level { font-size: 10px; color: var(--text-dim); }
+
+    .xp-chip {
+      display: flex; align-items: center; gap: 6px; padding: 6px 12px;
+      background: rgba(20, 20, 31, 0.9); border: 1px solid var(--border);
+      border-radius: 100px; font-size: 12px; font-weight: 600; backdrop-filter: blur(20px);
+    }
+    .xp-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--purple); box-shadow: 0 0 8px var(--purple-glow); }
+
+    /* FIX: индикатор GPS */
+    .gps-chip {
+      display: flex; align-items: center; gap: 6px; padding: 6px 10px;
+      background: rgba(20, 20, 31, 0.9); border: 1px solid var(--border);
+      border-radius: 100px; font-size: 11px; font-weight: 600;
+      backdrop-filter: blur(20px); transition: all 0.3s;
+    }
+    .gps-chip .gps-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--text-dim);
+      transition: all 0.3s;
+    }
+    .gps-chip.searching .gps-dot { background: var(--warning); animation: gpsPulse 1.2s infinite; }
+    .gps-chip.active .gps-dot { background: var(--success); box-shadow: 0 0 8px rgba(16,185,129,0.8); }
+    .gps-chip.error .gps-dot { background: var(--danger); }
+
+    @keyframes gpsPulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(1.4); }
+    }
+
+    /* ============ МЕТКИ ============ */
+    .zone-marker {
+      width: 44px; height: 44px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px; cursor: pointer; position: relative; transition: transform 0.2s;
+    }
+    .zone-marker:hover { transform: scale(1.1); }
+    .zone-marker.time-attack { background: linear-gradient(135deg, #ef4444, #f59e0b); box-shadow: 0 0 20px rgba(239, 68, 68, 0.5); }
+    .zone-marker.photo-zone { background: linear-gradient(135deg, var(--blue), var(--purple)); box-shadow: 0 0 20px rgba(59, 130, 246, 0.5); }
+    .zone-marker.drift { background: linear-gradient(135deg, #10b981, #3b82f6); box-shadow: 0 0 20px rgba(16, 185, 129, 0.5); }
+    .zone-marker.custom {
+      background: linear-gradient(135deg, #f472b6, #a855f7);
+      box-shadow: 0 0 20px rgba(244, 114, 182, 0.6);
+      border: 2px solid rgba(255,255,255,0.6);
+    }
+    .zone-marker::after {
+      content: ''; position: absolute; inset: -6px; border-radius: 50%;
+      border: 2px solid currentColor; opacity: 0; animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0% { transform: scale(0.8); opacity: 0.8; }
+      100% { transform: scale(1.6); opacity: 0; }
+    }
+
+    /* ============ ИГРОК ============ */
+    .player-marker-wrapper {
+      position: relative;
+      width: 48px; height: 48px;
+    }
+    .player-marker {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 40px; height: 40px; border-radius: 50%;
+      background: linear-gradient(135deg, var(--purple), #6366f1);
+      border: 3px solid white; display: flex; align-items: center; justify-content: center;
+      font-size: 20px;
+      box-shadow: 0 0 24px var(--purple-glow), 0 4px 12px rgba(0,0,0,0.5);
+      transition: transform 0.3s ease-out;
+    }
+    .player-marker .direction {
+      position: absolute;
+      top: -10px; left: 50%;
+      transform: translateX(-50%);
+      font-size: 14px;
+      color: var(--purple);
+      text-shadow: 0 0 8px var(--purple-glow);
+      transition: transform 0.2s;
+    }
+
+    /* FIX: круг точности GPS */
+    .accuracy-circle {
+      stroke: var(--purple);
+      stroke-opacity: 0.4;
+      stroke-width: 1;
+      fill: var(--purple);
+      fill-opacity: 0.1;
+      transition: all 0.5s;
+    }
+
+    /* ============ НИЖНЯЯ ПАНЕЛЬ ============ */
+    .bottom-nav {
+      position: relative; z-index: 10; margin-top: auto;
+      padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+      background: linear-gradient(0deg, rgba(10,10,18,0.98) 0%, rgba(10,10,18,0.9) 70%, rgba(10,10,18,0) 100%);
+      display: flex; justify-content: space-around; align-items: center;
+    }
+    .nav-item {
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      padding: 8px 12px; border-radius: 12px; cursor: pointer; transition: all 0.2s;
+      color: var(--text-dim); background: transparent; border: none; font-family: inherit;
+    }
+    .nav-item.active { color: var(--purple); }
+    .nav-item.active .nav-icon { transform: scale(1.15); }
+    .nav-icon { font-size: 22px; transition: transform 0.2s; }
+    .nav-label { font-size: 10px; font-weight: 600; }
+
+    /* ============ ПЛАВАЮЩИЕ КНОПКИ ============ */
+    .locate-btn, .create-btn {
+      position: absolute; right: 16px; z-index: 10;
+      width: 48px; height: 48px; border-radius: 50%;
+      background: var(--bg-elevated); border: 1px solid var(--border);
+      color: var(--text); font-size: 20px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+      transition: all 0.2s;
+    }
+    .locate-btn { bottom: 100px; }
+    .locate-btn.following {
+      background: linear-gradient(135deg, var(--purple), #6366f1);
+      border: none;
+      box-shadow: 0 4px 20px var(--purple-glow);
+    }
+    .create-btn {
+      bottom: 160px;
+      background: linear-gradient(135deg, var(--purple), #6366f1);
+      border: none;
+      box-shadow: 0 4px 20px var(--purple-glow);
+      font-size: 24px;
+      font-weight: 300;
+    }
+    .locate-btn:active, .create-btn:active { transform: scale(0.92); }
+
+    /* ============ ПАНЕЛЬ РИСОВАНИЯ ============ */
+    .draw-panel {
+      position: absolute; left: 12px; right: 12px; bottom: 90px; z-index: 50;
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 20px; padding: 14px; display: none; flex-direction: column; gap: 10px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.6); backdrop-filter: blur(20px);
+    }
+    .draw-panel.active { display: flex; }
+    .draw-header {
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 13px; font-weight: 600;
+    }
+    .draw-header .hint { color: var(--text-dim); font-weight: 400; font-size: 12px; }
+    .draw-actions { display: flex; gap: 8px; }
+    .draw-btn {
+      flex: 1; padding: 12px; border-radius: 12px; border: none;
+      font-family: inherit; font-size: 13px; font-weight: 700;
+      cursor: pointer; transition: all 0.15s;
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+    }
+    .draw-btn:active { transform: scale(0.96); }
+    .draw-btn.undo { background: var(--bg-elevated); color: var(--text); border: 1px solid var(--border); }
+    .draw-btn.clear { background: rgba(239, 68, 68, 0.15); color: var(--danger); border: 1px solid rgba(239, 68, 68, 0.3); }
+    .draw-btn.save {
+      background: linear-gradient(135deg, var(--success), #059669);
+      color: white; box-shadow: 0 4px 16px rgba(16, 185, 129, 0.4);
+    }
+    .draw-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ============ ТОЧКИ A/B ============ */
+    .route-point {
+      width: 32px; height: 32px; border-radius: 50%;
+      background: white; border: 3px solid var(--purple);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: 800; color: var(--purple);
+      box-shadow: 0 0 16px var(--purple-glow);
+    }
+    .route-point.start { border-color: var(--success); color: var(--success); box-shadow: 0 0 16px rgba(16,185,129,0.7); }
+    .route-point.finish { border-color: var(--danger); color: var(--danger); box-shadow: 0 0 16px rgba(239,68,68,0.7); }
+
+    /* ============ МОДАЛЬНОЕ ОКНО ============ */
+    .sheet-overlay {
+      position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(4px); z-index: 100; opacity: 0; pointer-events: none;
+      transition: opacity 0.3s;
+    }
+    .sheet-overlay.active { opacity: 1; pointer-events: auto; }
+    .sheet {
+      position: absolute; left: 0; right: 0; bottom: 0;
+      background: var(--bg-card); border-radius: 24px 24px 0 0;
+      padding: 20px; transform: translateY(100%);
+      transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      max-height: 85vh; overflow-y: auto;
+    }
+    .sheet-overlay.active .sheet { transform: translateY(0); }
+    .sheet-handle { width: 40px; height: 4px; background: var(--border); border-radius: 2px; margin: 0 auto 16px; }
+    .sheet-badge {
+      display: inline-block; padding: 4px 10px; border-radius: 100px;
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.5px; margin-bottom: 12px;
+    }
+    .badge-time-attack { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+    .badge-photo-zone { background: rgba(59, 130, 246, 0.15); color: var(--blue); }
+    .badge-drift { background: rgba(16, 185, 129, 0.15); color: var(--success); }
+    .badge-custom { background: rgba(244, 114, 182, 0.15); color: #f472b6; }
+    .sheet-title { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+    .sheet-subtitle { font-size: 14px; color: var(--text-dim); margin-bottom: 16px; }
+    .sheet-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+    .stat-card { padding: 12px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 14px; }
+    .stat-label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+    .stat-value { font-size: 18px; font-weight: 700; }
+    .stat-value.purple { color: var(--purple); }
+    .sheet-actions { display: flex; gap: 10px; margin-top: 8px; }
+    .btn {
+      flex: 1; padding: 16px; border-radius: 16px; border: none;
+      font-family: inherit; font-size: 15px; font-weight: 700;
+      cursor: pointer; transition: all 0.2s;
+    }
+    .btn:active { transform: scale(0.97); }
+    .btn-primary { background: linear-gradient(135deg, var(--purple), #6366f1); color: white; box-shadow: 0 4px 20px var(--purple-glow); }
+    .btn-secondary { background: var(--bg-elevated); color: var(--text); border: 1px solid var(--border); }
+    .btn-danger { background: rgba(239, 68, 68, 0.15); color: var(--danger); border: 1px solid rgba(239, 68, 68, 0.3); }
+
+    /* ============ ФОРМА ============ */
+    .form-group { margin-bottom: 14px; }
+    .form-label {
+      display: block; font-size: 12px; color: var(--text-dim);
+      text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; font-weight: 600;
+    }
+    .form-input, .form-textarea {
+      width: 100%; padding: 14px;
+      background: var(--bg-elevated); border: 1px solid var(--border);
+      border-radius: 12px; color: var(--text);
+      font-family: inherit; font-size: 15px; outline: none; transition: border-color 0.2s;
+    }
+    .form-input:focus, .form-textarea:focus { border-color: var(--purple); }
+    .form-textarea { resize: none; min-height: 80px; }
+    .type-options { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+    .type-option {
+      padding: 12px 8px; border-radius: 12px;
+      background: var(--bg-elevated); border: 1px solid var(--border);
+      color: var(--text-dim); font-family: inherit; font-size: 12px; font-weight: 600;
+      cursor: pointer; transition: all 0.2s;
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+    }
+    .type-option .emoji { font-size: 20px; }
+    .type-option.selected {
+      background: rgba(139, 92, 246, 0.15);
+      border-color: var(--purple);
+      color: var(--purple);
+    }
+
+    /* ============ ЭКРАНЫ ЗАЕЗДА / РЕЗУЛЬТАТА ============ */
+    .race-overlay, .result-overlay {
+      position: fixed; inset: 0; z-index: 200;
+      background: rgba(10, 10, 18, 0.95); backdrop-filter: blur(20px);
+      display: none; flex-direction: column;
+    }
+    .race-overlay { align-items: center; justify-content: center; padding: 24px; text-align: center; }
+    .race-overlay.active, .result-overlay.active { display: flex; }
+    .result-overlay { padding: 24px; overflow-y: auto; }
+    .race-timer {
+      font-size: 64px; font-weight: 800; font-variant-numeric: tabular-nums;
+      background: linear-gradient(135deg, var(--purple), var(--blue));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      margin: 16px 0; letter-spacing: -2px;
+    }
+    .race-label { font-size: 13px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 2px; }
+    .race-status { font-size: 18px; font-weight: 600; margin-top: 8px; }
+    .result-trophy { font-size: 72px; text-align: center; margin: 24px 0 8px; }
+    .result-title { text-align: center; font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+    .result-subtitle { text-align: center; font-size: 14px; color: var(--text-dim); margin-bottom: 24px; }
+    .result-time {
+      text-align: center; font-size: 56px; font-weight: 800; font-variant-numeric: tabular-nums;
+      background: linear-gradient(135deg, var(--purple), var(--blue));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      letter-spacing: -2px; margin-bottom: 8px;
+    }
+    .result-record { text-align: center; font-size: 14px; font-weight: 600; color: var(--success); margin-bottom: 24px; }
+    .result-xp { text-align: center; font-size: 16px; font-weight: 700; color: var(--purple); margin-bottom: 24px; }
+    .leaderboard { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; padding: 8px; margin-bottom: 16px; }
+    .leaderboard-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; font-size: 14px; }
+    .leaderboard-row.me { background: rgba(139, 92, 246, 0.15); border: 1px solid var(--purple); }
+    .leaderboard-place { width: 24px; font-weight: 700; color: var(--text-dim); }
+    .leaderboard-row.me .leaderboard-place { color: var(--purple); }
+    .leaderboard-name { flex: 1; font-weight: 600; }
+    .leaderboard-time { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+    /* ============ ТОСТ ============ */
+    .toast {
+      position: fixed; top: 80px; left: 50%;
+      transform: translateX(-50%) translateY(-100px);
+      background: var(--bg-elevated); border: 1px solid var(--border);
+      padding: 12px 20px; border-radius: 100px;
+      font-size: 14px; font-weight: 600; z-index: 300;
+      transition: transform 0.3s; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+      max-width: 90vw; text-align: center;
+    }
+    .toast.show { transform: translateX(-50%) translateY(0); }
+
+    /* ============ МОДАЛКА ГЕОЛОКАЦИИ (FIX) ============ */
+    .geo-overlay {
+      position: fixed; inset: 0; z-index: 400;
+      background: rgba(10, 10, 18, 0.95); backdrop-filter: blur(20px);
+      display: none; align-items: center; justify-content: center;
+      padding: 24px;
+    }
+    .geo-overlay.active { display: flex; }
+    .geo-modal {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 24px; padding: 28px 24px; max-width: 400px; width: 100%;
+      text-align: center;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+    }
+    .geo-icon { font-size: 56px; margin-bottom: 16px; }
+    .geo-title { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
+    .geo-text { font-size: 14px; color: var(--text-dim); line-height: 1.5; margin-bottom: 20px; }
+    .geo-actions { display: flex; flex-direction: column; gap: 10px; }
+    .geo-btn {
+      padding: 16px; border-radius: 16px; border: none;
+      font-family: inherit; font-size: 15px; font-weight: 700;
+      cursor: pointer; transition: all 0.2s;
+    }
+    .geo-btn:active { transform: scale(0.97); }
+    .geo-btn.primary { background: linear-gradient(135deg, var(--purple), #6366f1); color: white; box-shadow: 0 4px 20px var(--purple-glow); }
+    .geo-btn.secondary { background: var(--bg-elevated); color: var(--text); border: 1px solid var(--border); }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+<div id="app">
+
+  <div id="map"></div>
+
+  <!-- ВЕРХНЯЯ ПАНЕЛЬ -->
+  <div class="top-bar">
+    <div class="user-chip">
+      <div class="user-avatar" id="userAvatar">K</div>
+      <div class="user-info">
+        <div class="user-name" id="userName">Игрок</div>
+        <div class="user-level" id="userLevel">Уровень 1</div>
+      </div>
+    </div>
+    <div style="display:flex; gap:6px;">
+      <!-- FIX: индикатор GPS -->
+      <div class="gps-chip searching" id="gpsChip">
+        <div class="gps-dot"></div>
+        <span id="gpsLabel">GPS</span>
+      </div>
+      <div class="xp-chip">
+        <div class="xp-dot"></div>
+        <span id="userXp">0 XP</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- КНОПКА "МОЁ МЕСТО" (FIX: теперь работает как toggle) -->
+  <button class="locate-btn" id="locateBtn" title="Следить за мной">📍</button>
+
+  <!-- КНОПКА "СОЗДАТЬ МАРШРУТ" -->
+  <button class="create-btn" id="createBtn" title="Создать маршрут">+</button>
+
+  <!-- ПАНЕЛЬ РИСОВАНИЯ -->
+  <div class="draw-panel" id="drawPanel">
+    <div class="draw-header">
+      <span>🛣 Прокладка маршрута</span>
+      <span class="hint" id="drawHint">Тапни по карте — точка А</span>
+    </div>
+    <div class="draw-actions">
+      <button class="draw-btn undo" id="drawUndoBtn">↩ Сброс</button>
+      <button class="draw-btn clear" id="drawClearBtn">✕ Отмена</button>
+      <button class="draw-btn save" id="drawSaveBtn" disabled>💾 Сохранить</button>
+    </div>
+  </div>
+
+  <!-- НИЖНЯЯ НАВИГАЦИЯ -->
+  <nav class="bottom-nav">
+    <button class="nav-item active" data-tab="map"><span class="nav-icon">🗺</span><span class="nav-label">Карта</span></button>
+    <button class="nav-item" data-tab="tasks"><span class="nav-icon">🏁</span><span class="nav-label">Задания</span></button>
+    <button class="nav-item" data-tab="garage"><span class="nav-icon">🚗</span><span class="nav-label">Гараж</span></button>
+    <button class="nav-item" data-tab="rating"><span class="nav-icon">🏆</span><span class="nav-label">Рейтинг</span></button>
+    <button class="nav-item" data-tab="profile"><span class="nav-icon">👤</span><span class="nav-label">Профиль</span></button>
+  </nav>
+
+  <!-- МОДАЛЬНОЕ ОКНО -->
+  <div class="sheet-overlay" id="sheetOverlay">
+    <div class="sheet" id="sheet">
+      <div class="sheet-handle"></div>
+      <div id="sheetContent"></div>
+    </div>
+  </div>
+
+  <!-- ЭКРАН ЗАЕЗДА -->
+  <div class="race-overlay" id="raceOverlay">
+    <div class="race-label" id="raceLabel">Стрит-рейсинг</div>
+    <div class="race-timer" id="raceTimer">00:00.00</div>
+    <div class="race-status" id="raceStatus">Готов?</div>
+    <div class="sheet-actions" style="width: 100%; max-width: 400px; margin-top: 24px;">
+      <button class="btn btn-secondary" id="raceCancelBtn">Отмена</button>
+    </div>
+  </div>
+
+  <!-- ЭКРАН РЕЗУЛЬТАТА -->
+  <div class="result-overlay" id="resultOverlay">
+    <div class="result-trophy">🏆</div>
+    <div class="result-title" id="resultTitle">Стрит-рейсинг</div>
+    <div class="result-subtitle" id="resultSubtitle">Петропавловск-Камчатский</div>
+    <div class="result-time" id="resultTime">01:42.36</div>
+    <div class="result-record" id="resultRecord">🎉 Новый рекорд!</div>
+    <div class="result-xp" id="resultXp">+450 XP</div>
+
+    <div class="leaderboard" id="resultLeaderboard">
+      <div class="leaderboard-row"><span class="leaderboard-place">1</span><span class="leaderboard-name">MUSCATLORDS</span><span class="leaderboard-time">01:32.15</span></div>
+      <div class="leaderboard-row"><span class="leaderboard-place">2</span><span class="leaderboard-name">GhostRider</span><span class="leaderboard-time">01:34.67</span></div>
+      <div class="leaderboard-row me"><span class="leaderboard-place">3</span><span class="leaderboard-name">Ты</span><span class="leaderboard-time" id="meTime">01:42.36</span></div>
+    </div>
+
+    <div class="sheet-actions">
+      <button class="btn btn-secondary" id="resultCloseBtn">На карту</button>
+      <button class="btn btn-primary" id="resultRetryBtn">Повторить</button>
+    </div>
+  </div>
+
+  <!-- FIX: МОДАЛКА ГЕОЛОКАЦИИ -->
+  <div class="geo-overlay" id="geoOverlay">
+    <div class="geo-modal">
+      <div class="geo-icon" id="geoIcon">📍</div>
+      <div class="geo-title" id="geoTitle">Нужна геолокация</div>
+      <div class="geo-text" id="geoText">
+        Чтобы показать твою машину на карте и найти ближайшие задания, разреши доступ к местоположению.
+      </div>
+      <div class="geo-actions">
+        <button class="geo-btn primary" id="geoAllowBtn">Разрешить</button>
+        <button class="geo-btn secondary" id="geoLaterBtn">Позже</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+</div>
+
+<script>
+/* ============================================================
+   12.5.1 — Web App прототип v4 (FIX геолокации)
+   ============================================================ */
+
+const tg = window.Telegram?.WebApp;
+if (tg) { tg.ready(); tg.expand(); tg.setHeaderColor('#0a0a12'); tg.setBackgroundColor('#0a0a12'); }
+
+// ---------- Пользователь ----------
+const user = {
+  name: tg?.initDataUnsafe?.user?.first_name || 'Игрок',
+  level: 7,
+  xp: 2450,
+  xpMax: 3000,
+};
+document.getElementById('userName').textContent = user.name;
+document.getElementById('userAvatar').textContent = user.name[0].toUpperCase();
+document.getElementById('userLevel').textContent = `Уровень ${user.level}`;
+document.getElementById('userXp').textContent = `${user.xp} XP`;
+
+// ---------- Зоны ----------
+const ZONES = [
+  { id: 1, type: 'time-attack', title: 'Стрит-рейсинг', subtitle: 'Петропавловск-Камчатский', emoji: '🏁', lat: 53.0452, lng: 158.6483, distance: '2.4 км', record: '01:32.15', reward: '+450 XP' },
+  { id: 2, type: 'photo-zone', title: 'Вид на Авачинскую сопку', subtitle: 'Фотозона', emoji: '📸', lat: 53.0620, lng: 158.6710, distance: '1.2 км', record: '—', reward: '+200 XP' },
+  { id: 3, type: 'drift', title: 'Дрифт-площадка', subtitle: 'Мишенная сопка', emoji: '🏎', lat: 53.0380, lng: 158.6320, distance: '3.1 км', record: '8 500 очков', reward: '+300 XP' },
+  { id: 4, type: 'time-attack', title: 'Ночной заезд', subtitle: 'Центр города', emoji: '🏁', lat: 53.0250, lng: 158.6450, distance: '4.8 км', record: '02:15.80', reward: '+600 XP' },
+  { id: 5, type: 'photo-zone', title: 'Три брата', subtitle: 'Фотозона', emoji: '📸', lat: 53.0100, lng: 158.6800, distance: '5.5 км', record: '—', reward: '+250 XP' },
+];
+
+// ---------- localStorage ----------
+const STORAGE_KEY = '1251_custom_routes';
+function loadCustomRoutes() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
+  catch (e) { return []; }
+}
+function saveCustomRoutes(routes) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(routes)); }
+  catch (e) { showToast('⚠️ Не удалось сохранить'); }
+}
+let customRoutes = loadCustomRoutes();
+
+// ---------- Карта ----------
+const map = L.map('map', {
+  zoomControl: false,
+  attributionControl: false,
+  // FIX: включаем плавное отслеживание
+  preferCanvas: true,
+}).setView([53.0452, 158.6483], 13);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+
+// ============================================================
+// FIX: ГЕОЛОКАЦИЯ — watchPosition + обработка ошибок
+// ============================================================
+let playerMarker = null;
+let accuracyCircle = null;
+let playerLatLng = null;
+let watchId = null;
+let isFollowing = true;      // режим "следить за мной"
+let hasCenteredOnce = false; // первый раз центрируем, потом не дёргаем карту
+
+const playerIcon = L.divIcon({
+  className: '',
+  html: '<div class="player-marker-wrapper"><div class="player-marker">🚗</div></div>',
+  iconSize: [48, 48],
+  iconAnchor: [24, 24],
+});
+
+// ---------- UI статуса GPS ----------
+const gpsChip = document.getElementById('gpsChip');
+const gpsLabel = document.getElementById('gpsLabel');
+
+function setGpsStatus(status, text) {
+  gpsChip.classList.remove('searching', 'active', 'error');
+  gpsChip.classList.add(status);
+  gpsLabel.textContent = text || 'GPS';
+}
+
+// ---------- Модалка геолокации ----------
+const geoOverlay = document.getElementById('geoOverlay');
+const geoTitle = document.getElementById('geoTitle');
+const geoText = document.getElementById('geoText');
+const geoIcon = document.getElementById('geoIcon');
+const geoAllowBtn = document.getElementById('geoAllowBtn');
+const geoLaterBtn = document.getElementById('geoLaterBtn');
+
+function showGeoModal(opts) {
+  geoIcon.textContent = opts.icon || '📍';
+  geoTitle.textContent = opts.title || 'Нужна геолокация';
+  geoText.innerHTML = opts.text || 'Разреши доступ к местоположению.';
+  geoAllowBtn.textContent = opts.allowText || 'Разрешить';
+  geoLaterBtn.textContent = opts.laterText || 'Позже';
+  geoOverlay.classList.add('active');
+}
+
+function hideGeoModal() {
+  geoOverlay.classList.remove('active');
+}
+
+// ---------- Запуск отслеживания ----------
+function startGeolocation() {
+  if (!navigator.geolocation) {
+    setGpsStatus('error', 'Нет GPS');
+    showGeoModal({
+      icon: '😕',
+      title: 'Геолокация не поддерживается',
+      text: 'Твой браузер не поддерживает определение местоположения. Попробуй открыть в другом браузере.',
+      allowText: 'Понятно',
+      laterText: 'Закрыть',
+    });
+    return;
+  }
+
+  setGpsStatus('searching', 'Поиск...');
+
+  // FIX: watchPosition — постоянное отслеживание
+  watchId = navigator.geolocation.watchPosition(
+    onPositionSuccess,
+    onPositionError,
+    {
+      enableHighAccuracy: true,   // точный GPS
+      maximumAge: 0,              // не использовать кэш
+      timeout: 15000,             // 15 сек — на поиск
+    }
+  );
+}
+
+// ---------- Успех ----------
+function onPositionSuccess(pos) {
+  const { latitude, longitude, accuracy } = pos.coords;
+
+  // FIX: отфильтровываем плохие позиции
+  // Если точность хуже 200 м — это "сырая" позиция, ждём лучшую
+  if (accuracy > 200 && !playerMarker) {
+    setGpsStatus('searching', `±${Math.round(accuracy)} м`);
+    return;
+  }
+
+  playerLatLng = { lat: latitude, lng: longitude };
+
+  // FIX: создаём или двигаем маркер
+  const latlng = L.latLng(latitude, longitude);
+
+  if (!playerMarker) {
+    playerMarker = L.marker(latlng, {
+      icon: playerIcon,
+      zIndexOffset: 1000,
+      interactive: false,
+    }).addTo(map);
+
+    accuracyCircle = L.circle(latlng, {
+      radius: accuracy,
+      className: 'accuracy-circle',
+      interactive: false,
+    }).addTo(map);
+  } else {
+    // Плавное перемещение
+    playerMarker.setLatLng(latlng);
+    if (accuracyCircle) {
+      accuracyCircle.setLatLng(latlng);
+      accuracyCircle.setRadius(accuracy);
+    }
+  }
+
+  // FIX: центрируем карту только при первом успешном определении
+  // или если включён режим "следить за мной"
+  if (!hasCenteredOnce) {
+    map.setView(latlng, 16, { animate: true });
+    hasCenteredOnce = true;
+  } else if (isFollowing) {
+    map.panTo(latlng, { animate: true, duration: 0.5 });
+  }
+
+  // Обновляем статус
+  if (accuracy <= 20) setGpsStatus('active', 'GPS');
+  else if (accuracy <= 50) setGpsStatus('active', `±${Math.round(accuracy)} м`);
+  else setGpsStatus('searching', `±${Math.round(accuracy)} м`);
+
+  hideGeoModal();
+}
+
+// ---------- Ошибка ----------
+function onPositionError(err) {
+  console.warn('GPS error:', err);
+
+  switch (err.code) {
+    case err.PERMISSION_DENIED:
+      setGpsStatus('error', 'Запрещено');
+      showGeoModal({
+        icon: '🚫',
+        title: 'Доступ к геолокации запрещён',
+        text: `Ты запретил доступ к местоположению. Чтобы включить:<br><br>
+          1. Открой настройки браузера<br>
+          2. Найди раздел «Разрешения» → «Местоположение»<br>
+          3. Разреши для этого сайта<br><br>
+          Или нажми кнопку ниже, чтобы попробовать снова.`,
+        allowText: 'Попробовать снова',
+        laterText: 'Позже',
+      });
+      break;
+
+    case err.POSITION_UNAVAILABLE:
+      setGpsStatus('error', 'GPS выкл');
+      showGeoModal({
+        icon: '📵',
+        title: 'GPS выключен',
+        text: `Определение местоположения недоступно.<br><br>
+          Проверь, включён ли GPS в настройках телефона.<br>
+          На Android: Настройки → Местоположение<br>
+          На iPhone: Настройки → Конфиденциальность → Службы геолокации`,
+        allowText: 'Повторить',
+        laterText: 'Позже',
+      });
+      break;
+
+    case err.TIMEOUT:
+      setGpsStatus('error', 'Таймаут');
+      showGeoModal({
+        icon: '⏱',
+        title: 'Не удалось определить',
+        text: 'GPS не отвечает. Попробуй выйти на открытое место или подожди немного.',
+        allowText: 'Повторить',
+        laterText: 'Позже',
+      });
+      break;
+  }
+}
+
+// ---------- Кнопки в модалке ----------
+geoAllowBtn.addEventListener('click', () => {
+  hideGeoModal();
+  // Перезапускаем поиск
+  if (watchId !== null) {
+    navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+  }
+  startGeolocation();
+});
+
+geoLaterBtn.addEventListener('click', () => {
+  hideGeoModal();
+});
+
+// ---------- Кнопка "моё место" — toggle follow ----------
+const locateBtn = document.getElementById('locateBtn');
+
+locateBtn.addEventListener('click', () => {
+  // Если GPS ещё не запущен — запускаем
+  if (watchId === null) {
+    startGeolocation();
+    return;
+  }
+
+  // Если позиция неизвестна — ждём
+  if (!playerLatLng) {
+    showToast('⏳ Определяем позицию...');
+    return;
+  }
+
+  // Переключаем режим follow
+  isFollowing = !isFollowing;
+
+  if (isFollowing) {
+    locateBtn.classList.add('following');
+    map.setView([playerLatLng.lat, playerLatLng.lng], 16, { animate: true });
+    showToast('🎯 Слежу за тобой');
+  } else {
+    locateBtn.classList.remove('following');
+    showToast('📍 Свободный режим');
+  }
+});
+
+// FIX: отслеживаем, когда игрок сам двигает карту — отключаем follow
+map.on('dragstart', () => {
+  if (isFollowing) {
+    isFollowing = false;
+    locateBtn.classList.remove('following');
+  }
+});
+
+// ============================================================
+// Слои
+// ============================================================
+const zonesLayer = L.layerGroup().addTo(map);
+const customRoutesLayer = L.layerGroup().addTo(map);
+
+// ---------- Отрисовка встроенных зон ----------
+function renderBuiltInZones() {
+  zonesLayer.clearLayers();
+  ZONES.forEach((zone) => {
+    const iconClass = zone.type === 'time-attack' ? 'time-attack'
+      : zone.type === 'photo-zone' ? 'photo-zone' : 'drift';
+
+    const icon = L.divIcon({
+      className: '',
+      html: `<div class="zone-marker ${iconClass}">${zone.emoji}</div>`,
+      iconSize: [44, 44],
+      iconAnchor: [22, 22],
+    });
+
+    const marker = L.marker([zone.lat, zone.lng], { icon }).addTo(zonesLayer);
+    marker.on('click', () => openZoneSheet(zone));
+  });
+}
+
+// ---------- Отрисовка пользовательских маршрутов ----------
+function renderCustomRoutes() {
+  customRoutesLayer.clearLayers();
+
+  customRoutes.forEach((route) => {
+    if (route.routeGeometry && route.routeGeometry.length > 0) {
+      const latlngs = route.routeGeometry.map(p => [p.lat, p.lng]);
+
+      L.polyline(latlngs, { color: '#8b5cf6', weight: 10, opacity: 0.15, lineJoin: 'round', lineCap: 'round' }).addTo(customRoutesLayer);
+      L.polyline(latlngs, { color: '#ffffff', weight: 6, opacity: 0.4, lineJoin: 'round', lineCap: 'round' }).addTo(customRoutesLayer);
+      L.polyline(latlngs, { color: '#8b5cf6', weight: 3, opacity: 1, lineJoin: 'round', lineCap: 'round' }).addTo(customRoutesLayer);
+
+      const centerIdx = Math.floor(latlngs.length / 2);
+      const center = latlngs[centerIdx];
+
+      const icon = L.divIcon({
+        className: '',
+        html: `<div class="zone-marker custom">${route.emoji || '📍'}</div>`,
+        iconSize: [44, 44],
+        iconAnchor: [22, 22],
+      });
+
+      const marker = L.marker(center, { icon }).addTo(customRoutesLayer);
+      marker.on('click', () => openCustomRouteSheet(route));
+    }
+  });
+}
+
+// ============================================================
+// Карточки
+// ============================================================
+const sheetOverlay = document.getElementById('sheetOverlay');
+const sheetContent = document.getElementById('sheetContent');
+
+function openZoneSheet(zone) {
+  const badgeClass = zone.type === 'time-attack' ? 'badge-time-attack'
+    : zone.type === 'photo-zone' ? 'badge-photo-zone' : 'badge-drift';
+  const badgeText = zone.type === 'time-attack' ? 'Тайм-атака'
+    : zone.type === 'photo-zone' ? 'Фотозона' : 'Дрифт';
+  const actionText = zone.type === 'time-attack' ? 'Начать заезд'
+    : zone.type === 'photo-zone' ? 'Сделать фото' : 'Начать дрифт';
+
+  sheetContent.innerHTML = `
+    <div class="sheet-badge ${badgeClass}">${badgeText}</div>
+    <div class="sheet-title">${zone.title}</div>
+    <div class="sheet-subtitle">${zone.subtitle}</div>
+    <div class="sheet-stats">
+      <div class="stat-card"><div class="stat-label">Расстояние</div><div class="stat-value">${zone.distance}</div></div>
+      <div class="stat-card"><div class="stat-label">Рекорд</div><div class="stat-value purple">${zone.record}</div></div>
+    </div>
+    <div class="sheet-actions">
+      <button class="btn btn-secondary" id="sheetCloseBtn">Закрыть</button>
+      <button class="btn btn-primary" id="sheetStartBtn">${actionText}</button>
+    </div>
+  `;
+
+  sheetOverlay.classList.add('active');
+  document.getElementById('sheetCloseBtn').onclick = closeSheet;
+  document.getElementById('sheetStartBtn').onclick = () => {
+    closeSheet();
+    if (zone.type === 'time-attack' || zone.type === 'drift') startRace(zone);
+    else showToast('📸 Фотозона: функция в разработке');
+  };
+}
+
+function openCustomRouteSheet(route) {
+  const distance = route.distance ? formatDistance(route.distance) : '—';
+  const duration = route.duration ? formatDuration(route.duration) : '—';
+
+  sheetContent.innerHTML = `
+    <div class="sheet-badge badge-custom">Свой маршрут</div>
+    <div class="sheet-title">${route.title}</div>
+    <div class="sheet-subtitle">${route.subtitle || 'Пользовательский маршрут'}</div>
+    <div class="sheet-stats">
+      <div class="stat-card"><div class="stat-label">Дистанция</div><div class="stat-value">${distance}</div></div>
+      <div class="stat-card"><div class="stat-label">Время в пути</div><div class="stat-value purple">${duration}</div></div>
+    </div>
+    <div class="sheet-actions">
+      <button class="btn btn-secondary" id="sheetCloseBtn">Закрыть</button>
+      <button class="btn btn-primary" id="sheetStartBtn">Начать заезд</button>
+    </div>
+    <div class="sheet-actions" style="margin-top: 10px;">
+      <button class="btn btn-danger" id="sheetDeleteBtn">🗑 Удалить маршрут</button>
+    </div>
+  `;
+
+  sheetOverlay.classList.add('active');
+  document.getElementById('sheetCloseBtn').onclick = closeSheet;
+  document.getElementById('sheetStartBtn').onclick = () => {
+    closeSheet();
+    startRace({ ...route, type: 'time-attack', reward: '+350 XP' });
+  };
+  document.getElementById('sheetDeleteBtn').onclick = () => {
+    if (!confirm(`Удалить маршрут «${route.title}»?`)) return;
+    customRoutes = customRoutes.filter((r) => r.id !== route.id);
+    saveCustomRoutes(customRoutes);
+    renderCustomRoutes();
+    closeSheet();
+    showToast('🗑 Маршрут удалён');
+  };
+}
+
+function closeSheet() { sheetOverlay.classList.remove('active'); }
+sheetOverlay.addEventListener('click', (e) => { if (e.target === sheetOverlay) closeSheet(); });
+
+// ============================================================
+// Прокладка маршрута
+// ============================================================
+const createBtn = document.getElementById('createBtn');
+const drawPanel = document.getElementById('drawPanel');
+const drawUndoBtn = document.getElementById('drawUndoBtn');
+const drawClearBtn = document.getElementById('drawClearBtn');
+const drawSaveBtn = document.getElementById('drawSaveBtn');
+const drawHint = document.getElementById('drawHint');
+
+let isDrawing = false;
+let currentPoints = [];
+let currentPointMarkers = [];
+let pendingRouteData = null;
+let previewPolyline = null;
+
+createBtn.addEventListener('click', () => {
+  if (isDrawing) cancelDrawing();
+  else startDrawing();
+});
+
+function startDrawing() {
+  isDrawing = true;
+  currentPoints = [];
+  pendingRouteData = null;
+  drawPanel.classList.add('active');
+  createBtn.textContent = '✕';
+  createBtn.style.background = 'linear-gradient(135deg, #ef4444, #dc2626)';
+  drawHint.textContent = 'Тапни по карте — точка А';
+  updateDrawButtons();
+  map.getContainer().style.cursor = 'crosshair';
+  map.on('click', onMapClickForDraw);
+}
+
+function cancelDrawing() {
+  isDrawing = false;
+  drawPanel.classList.remove('active');
+  createBtn.textContent = '+';
+  createBtn.style.background = 'linear-gradient(135deg, var(--purple), #6366f1)';
+  map.getContainer().style.cursor = '';
+  map.off('click', onMapClickForDraw);
+  currentPointMarkers.forEach((m) => map.removeLayer(m));
+  currentPointMarkers = [];
+  if (previewPolyline) { map.removeLayer(previewPolyline); previewPolyline = null; }
+  currentPoints = [];
+  pendingRouteData = null;
+  updateDrawButtons();
+}
+
+function onMapClickForDraw(e) {
+  if (currentPoints.length >= 2) return;
+
+  const { lat, lng } = e.latlng;
+  currentPoints.push({ lat, lng });
+
+  const isStart = currentPoints.length === 1;
+  const label = isStart ? 'A' : 'B';
+
+  const pointIcon = L.divIcon({
+    className: '',
+    html: `<div class="route-point ${isStart ? 'start' : 'finish'}">${label}</div>`,
+    iconSize: [32, 32],
+    iconAnchor: [16, 16],
+  });
+
+  const marker = L.marker([lat, lng], { icon: pointIcon, interactive: false }).addTo(map);
+  currentPointMarkers.push(marker);
+  updateDrawButtons();
+
+  if (currentPoints.length === 2) {
+    drawHint.textContent = '⏳ Строим маршрут...';
+    drawSaveBtn.disabled = true;
+    map.off('click', onMapClickForDraw);
+    buildRouteGeometry(currentPoints[0], currentPoints[1]);
+  } else {
+    drawHint.textContent = 'Тапни по карте — точка B';
+  }
+}
+
+function buildRouteGeometry(start, end) {
+  const osrmUrl = `https://router.project-osrm.org/route/v1/driving/` +
+    `${start.lng},${start.lat};${end.lng},${end.lat}` +
+    `?overview=full&geometries=geojson`;
+
+  fetch(osrmUrl)
+    .then(res => res.json())
+    .then(data => {
+      if (data.code !== 'Ok' || !data.routes || data.routes.length === 0) {
+        throw new Error('Маршрут не найден');
+      }
+
+      const route = data.routes[0];
+      const coords = route.geometry.coordinates;
+      const routePoints = coords.map(c => ({ lat: c[1], lng: c[0] }));
+
+      pendingRouteData = {
+        start, end,
+        routeGeometry: routePoints,
+        distance: route.distance,
+        duration: route.duration,
+      };
+
+      drawPreviewRoute(routePoints);
+      drawHint.textContent = `✅ ${formatDistance(route.distance)} • ${formatDuration(route.duration)}`;
+      drawSaveBtn.disabled = false;
+    })
+    .catch(err => {
+      console.error('OSRM error:', err);
+      showToast('⚠️ Не удалось построить маршрут');
+      drawHint.textContent = '❌ Ошибка. Попробуй другие точки';
+      drawSaveBtn.disabled = true;
+      currentPointMarkers.forEach((m) => map.removeLayer(m));
+      currentPointMarkers = [];
+      currentPoints = [];
+      updateDrawButtons();
+      map.on('click', onMapClickForDraw);
+    });
+}
+
+function drawPreviewRoute(routePoints) {
+  if (previewPolyline) map.removeLayer(previewPolyline);
+  const latlngs = routePoints.map(p => [p.lat, p.lng]);
+  previewPolyline = L.layerGroup([
+    L.polyline(latlngs, { color: '#8b5cf6', weight: 10, opacity: 0.15, lineJoin: 'round', lineCap: 'round' }),
+    L.polyline(latlngs, { color: '#ffffff', weight: 6, opacity: 0.4, lineJoin: 'round', lineCap: 'round' }),
+    L.polyline(latlngs, { color: '#8b5cf6', weight: 3, opacity: 1, lineJoin: 'round', lineCap: 'round' }),
+  ]).addTo(map);
+  map.fitBounds(L.latLngBounds(latlngs), { padding: [80, 80] });
+}
+
+function updateDrawButtons() {
+  drawUndoBtn.disabled = currentPoints.length === 0;
+  drawClearBtn.disabled = currentPoints.length === 0;
+  drawSaveBtn.disabled = !pendingRouteData;
+}
+
+drawUndoBtn.addEventListener('click', () => {
+  if (currentPoints.length === 0) return;
+  currentPoints.pop();
+  const marker = currentPointMarkers.pop();
+  if (marker) map.removeLayer(marker);
+  if (previewPolyline) { map.removeLayer(previewPolyline); previewPolyline = null; }
+  pendingRouteData = null;
+  map.on('click', onMapClickForDraw);
+  drawHint.textContent = currentPoints.length === 0
+    ? 'Тапни по карте — точка А'
+    : 'Тапни по карте — точка B';
+  updateDrawButtons();
+});
+
+drawClearBtn.addEventListener('click', cancelDrawing);
+drawSaveBtn.addEventListener('click', () => {
+  if (!pendingRouteData) return;
+  openRouteFormSheet();
+});
+
+// ============================================================
+// Форма
+// ============================================================
+let selectedRouteType = 'time-attack';
+
+function openRouteFormSheet() {
+  const { distance, duration } = pendingRouteData;
+
+  sheetContent.innerHTML = `
+    <div class="sheet-badge badge-custom">Новый маршрут</div>
+    <div class="sheet-title">Сохранить маршрут</div>
+    <div class="sheet-subtitle">${formatDistance(distance)} • ${formatDuration(duration)}</div>
+
+    <div class="form-group">
+      <label class="form-label">Название</label>
+      <input class="form-input" id="routeTitleInput" type="text" placeholder="Например: Заезд у сопки" maxlength="40" />
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Тип</label>
+      <div class="type-options" id="typeOptions">
+        <button class="type-option selected" data-type="time-attack"><span class="emoji">🏁</span><span>Заезд</span></button>
+        <button class="type-option" data-type="photo-zone"><span class="emoji">📸</span><span>Фото</span></button>
+        <button class="type-option" data-type="drift"><span class="emoji">🏎</span><span>Дрифт</span></button>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Описание (опционально)</label>
+      <textarea class="form-textarea" id="routeDescInput" placeholder="Что интересного на этом маршруте?" maxlength="200"></textarea>
+    </div>
+
+    <div class="sheet-actions">
+      <button class="btn btn-secondary" id="formCancelBtn">Отмена</button>
+      <button class="btn btn-primary" id="formSaveBtn">Сохранить</button>
+    </div>
+  `;
+
+  sheetOverlay.classList.add('active');
+  selectedRouteType = 'time-attack';
+
+  document.querySelectorAll('.type-option').forEach((btn) => {
+    btn.onclick = () => {
+      document.querySelectorAll('.type-option').forEach((b) => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      selectedRouteType = btn.dataset.type;
+    };
+  });
+
+  document.getElementById('formCancelBtn').onclick = closeSheet;
+
+  document.getElementById('formSaveBtn').onclick = () => {
+    const title = document.getElementById('routeTitleInput').value.trim();
+    const desc = document.getElementById('routeDescInput').value.trim();
+    if (!title) { showToast('⚠️ Введи название'); return; }
+
+    const emojiMap = { 'time-attack': '🏁', 'photo-zone': '📸', 'drift': '🏎' };
+
+    const newRoute = {
+      id: 'custom_' + Date.now(),
+      title,
+      subtitle: desc || 'Пользовательский маршрут',
+      type: selectedRouteType,
+      emoji: emojiMap[selectedRouteType] || '📍',
+      startPoint: pendingRouteData.start,
+      endPoint: pendingRouteData.end,
+      routeGeometry: pendingRouteData.routeGeometry,
+      distance: pendingRouteData.distance,
+      duration: pendingRouteData.duration,
+      createdAt: Date.now(),
+      isCustom: true,
+    };
+
+    customRoutes.push(newRoute);
+    saveCustomRoutes(customRoutes);
+    renderCustomRoutes();
+    closeSheet();
+    cancelDrawing();
+    showToast('✅ Маршрут сохранён!');
+    setTimeout(() => {
+      map.fitBounds(L.latLngBounds(newRoute.routeGeometry.map(p => [p.lat, p.lng])), { padding: [80, 80], duration: 1 });
+    }, 300);
+  };
+}
+
+// ---------- Утилиты ----------
+function formatDistance(meters) {
+  if (meters < 1000) return Math.round(meters) + ' м';
+  return (meters / 1000).toFixed(1) + ' км';
+}
+function formatDuration(seconds) {
+  const min = Math.floor(seconds / 60);
+  const sec = Math.round(seconds % 60);
+  if (min === 0) return sec + ' сек';
+  if (min < 60) return `${min} мин`;
+  const h = Math.floor(min / 60), m = min % 60;
+  return `${h} ч ${m} мин`;
+}
+
+// ============================================================
+// Заезд
+// ============================================================
+const raceOverlay = document.getElementById('raceOverlay');
+const raceTimer = document.getElementById('raceTimer');
+const raceStatus = document.getElementById('raceStatus');
+const raceLabel = document.getElementById('raceLabel');
+
+let raceStartTime = null;
+let raceInterval = null;
+let currentZone = null;
+
+function startRace(zone) {
+  currentZone = zone;
+  raceOverlay.classList.add('active');
+  raceLabel.textContent = zone.title || 'Заезд';
+  raceStatus.textContent = 'Приготовься...';
+  raceTimer.textContent = '00:00.00';
+
+  let countdown = 3;
+  raceStatus.textContent = `Старт через ${countdown}...`;
+
+  const ci = setInterval(() => {
+    countdown--;
+    if (countdown > 0) raceStatus.textContent = `Старт через ${countdown}...`;
+    else {
+      clearInterval(ci);
+      raceStatus.textContent = 'В путь! 🏁';
+      beginTimer();
+    }
+  }, 1000);
+}
+
+function beginTimer() {
+  raceStartTime = Date.now();
+  raceInterval = setInterval(() => {
+    raceTimer.textContent = formatTime(Date.now() - raceStartTime);
+  }, 30);
+  setTimeout(finishRace, 5000 + Math.random() * 5000);
+}
+
+function finishRace() {
+  clearInterval(raceInterval);
+  const elapsed = Date.now() - raceStartTime;
+  const finalTime = formatTime(elapsed);
+  raceOverlay.classList.remove('active');
+
+  document.getElementById('resultTitle').textContent = currentZone.title || 'Заезд';
+  document.getElementById('resultSubtitle').textContent = currentZone.subtitle || 'Пользовательский маршрут';
+  document.getElementById('resultTime').textContent = finalTime;
+  document.getElementById('meTime').textContent = finalTime;
+  document.getElementById('resultXp').textContent = currentZone.reward || '+350 XP';
+  document.getElementById('resultRecord').textContent = '🎉 Новый рекорд!';
+  document.getElementById('resultOverlay').classList.add('active');
+}
+
+function formatTime(ms) {
+  const totalSec = Math.floor(ms / 1000);
+  const min = Math.floor(totalSec / 60).toString().padStart(2, '0');
+  const sec = (totalSec % 60).toString().padStart(2, '0');
+  const cs = Math.floor((ms % 1000) / 10).toString().padStart(2, '0');
+  return `${min}:${sec}.${cs}`;
+}
+
+document.getElementById('raceCancelBtn').onclick = () => { clearInterval(raceInterval); raceOverlay.classList.remove('active'); };
+document.getElementById('resultCloseBtn').onclick = () => document.getElementById('resultOverlay').classList.remove('active');
+document.getElementById('resultRetryBtn').onclick = () => {
+  document.getElementById('resultOverlay').classList.remove('active');
+  if (currentZone) startRace(currentZone);
+};
+
+// ============================================================
+// Навигация
+// ============================================================
+document.querySelectorAll('.nav-item').forEach((item) => {
+  item.addEventListener('click', () => {
+    document.querySelectorAll('.nav-item').forEach((i) => i.classList.remove('active'));
+    item.classList.add('active');
+    const tab = item.dataset.tab;
+    if (tab === 'map') showToast('🗺 Карта');
+    else if (tab === 'tasks') showToast(`🏁 Заданий: ${ZONES.length + customRoutes.length}`);
+    else if (tab === 'garage') showToast('🚗 Гараж: Honda Vanta');
+    else if (tab === 'rating') showToast('🏆 Рейтинг: ты на 3 месте');
+    else if (tab === 'profile') showToast(`👤 ${user.name}, уровень ${user.level}`);
+  });
+});
+
+// ============================================================
+// Тост
+// ============================================================
+const toast = document.getElementById('toast');
+let toastTimeout = null;
+function showToast(text) {
+  toast.textContent = text;
+  toast.classList.add('show');
+  clearTimeout(toastTimeout);
+  toastTimeout = setTimeout(() => toast.classList.remove('show'), 2500);
+}
+
+// ============================================================
+// Инициализация
+// ============================================================
+renderBuiltInZones();
+renderCustomRoutes();
+
+// FIX: проверяем статус разрешения и запускаем GPS
+async function initGeolocation() {
+  // Проверяем поддержку Permissions API
+  if (navigator.permissions && navigator.permissions.query) {
+    try {
+      const result = await navigator.permissions.query({ name: 'geolocation' });
+
+      if (result.state === 'granted') {
+        // Разрешение уже дано — запускаем сразу
+        startGeolocation();
+      } else if (result.state === 'prompt') {
+        // Спросим разрешение — покажем модалку
+        showGeoModal({
+          icon: '📍',
+          title: 'Разреши геолокацию',
+          text: 'Чтобы показать твою машину на карте и найти ближайшие задания, нужно разрешить доступ к местоположению.',
+          allowText: 'Разрешить',
+          laterText: 'Позже',
+        });
+      } else {
+        // denied — показываем ошибку
+        setGpsStatus('error', 'Запрещено');
+        showGeoModal({
+          icon: '🚫',
+          title: 'Доступ запрещён',
+          text: 'Разреши доступ к геолокации в настройках браузера, чтобы игра работала.',
+          allowText: 'Понятно',
+          laterText: 'Закрыть',
+        });
+      }
+    } catch (e) {
+      // Permissions API не поддерживает geolocation — просто стартуем
+      startGeolocation();
+    }
+  } else {
+    // Нет Permissions API — стартуем
+    startGeolocation();
+  }
+}
+
+initGeolocation();
+
+setTimeout(() => {
+  const count = customRoutes.length;
+  showToast(count > 0
+    ? `🏔 Добро пожаловать! Твоих маршрутов: ${count}`
+    : '🏔 Добро пожаловать в 12.5.1!');
+}, 800);
+
+</script>
+</body>
+</html>
